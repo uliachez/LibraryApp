@@ -1,7 +1,6 @@
 import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
 import java.awt.*;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
 import java.sql.*;
 
 public class LibraryApp {
@@ -12,7 +11,8 @@ public class LibraryApp {
     private JFrame frame;
     private JTextField titleField;
     private JTextField authorField;
-    private JTextArea outputArea;
+    private JTable bookTable;
+    private DefaultTableModel tableModel;
 
     static {
         try {
@@ -29,179 +29,169 @@ public class LibraryApp {
     private void initialize() {
         frame = new JFrame("Библиотека");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setSize(400, 300);
-        frame.setLayout(new GridLayout(5, 1));
+        frame.setSize(800, 600);
+        frame.setLayout(new BorderLayout());
 
+        JPanel inputPanel = new JPanel(new GridLayout(2, 2));
         titleField = new JTextField();
         authorField = new JTextField();
+        inputPanel.add(new JLabel("Название книги:"));
+        inputPanel.add(titleField);
+        inputPanel.add(new JLabel("Автор:"));
+        inputPanel.add(authorField);
+
+        JPanel buttonPanel = new JPanel(new GridLayout(1, 5));
         JButton addButton = new JButton("Добавить книгу");
         JButton searchButton = new JButton("Найти книгу");
         JButton deleteButton = new JButton("Удалить книгу");
-        outputArea = new JTextArea();
-        outputArea.setEditable(false);
+        JButton deleteDbButton = new JButton("Удалить базу данных");
+        JButton showAllButton = new JButton("Показать все книги");
 
-        frame.add(new JLabel("Название книги:"));
-        frame.add(titleField);
-        frame.add(new JLabel("Автор:"));
-        frame.add(authorField);
-        frame.add(addButton);
-        frame.add(searchButton);
-        frame.add(deleteButton);
-        frame.add(new JScrollPane(outputArea));
+        buttonPanel.add(addButton);
+        buttonPanel.add(searchButton);
+        buttonPanel.add(deleteButton);
+        buttonPanel.add(deleteDbButton);
+        buttonPanel.add(showAllButton);
 
-        addButton.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                String title = titleField.getText();
-                String author = authorField.getText();
-                if (!title.isEmpty() && !author.isEmpty()) {
-                    try {
-                        insertBook(title, author);
-                        outputArea.setText("Книга добавлена: " + title);
-                    } catch (SQLException ex) {
-                        outputArea.setText("Ошибка при добавлении книги: " + ex.getMessage());
-                    }
-                } else {
-                    outputArea.setText("Ошибка: заполните все поля!");
+        tableModel = new DefaultTableModel(new Object[]{"ID", "Название", "Автор"}, 0);
+        bookTable = new JTable(tableModel);
+        JScrollPane scrollPane = new JScrollPane(bookTable);
+
+        frame.add(inputPanel, BorderLayout.NORTH);
+        frame.add(buttonPanel, BorderLayout.CENTER);
+        frame.add(scrollPane, BorderLayout.SOUTH);
+
+        addButton.addActionListener(e -> {
+            String title = titleField.getText();
+            String author = authorField.getText();
+            if (!title.isEmpty() && !author.isEmpty()) {
+                try {
+                    insertBook(title, author);
+                    updateTable();
+                } catch (SQLException ex) {
+                    showError("Ошибка при добавлении книги: " + ex.getMessage());
                 }
+            } else {
+                showError("Ошибка: заполните все поля!");
             }
         });
 
-        searchButton.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                String title = titleField.getText();
-                if (!title.isEmpty()) {
-                    try {
-                        String bookInfo = searchBookByTitle(title);
-                        outputArea.setText(bookInfo.isEmpty() ? "Книга не найдена." : bookInfo);
-                    } catch (SQLException ex) {
-                        outputArea.setText("Ошибка при поиске книги: " + ex.getMessage());
-                    }
-                } else {
-                    outputArea.setText("Введите название книги для поиска.");
+        searchButton.addActionListener(e -> {
+            String title = titleField.getText();
+            if (!title.isEmpty()) {
+                try {
+                    searchBookByTitle(title);
+                } catch (SQLException ex) {
+                    showError("Ошибка при поиске книги: " + ex.getMessage());
                 }
+            } else {
+                showError("Введите название книги для поиска.");
             }
         });
 
-        deleteButton.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                String title = titleField.getText();
-                if (!title.isEmpty()) {
-                    try {
-                        deleteBookByTitle(title);
-                        outputArea.setText("Книга удалена: " + title);
-                    } catch (SQLException ex) {
-                        outputArea.setText("Ошибка при удалении книги: " + ex.getMessage());
-                    }
-                } else {
-                    outputArea.setText("Введите название книги для удаления.");
+        deleteButton.addActionListener(e -> {
+            int selectedRow = bookTable.getSelectedRow();
+            if (selectedRow != -1) {
+                String title = tableModel.getValueAt(selectedRow, 1).toString();
+                try {
+                    deleteBookByTitle(title);
+                    updateTable();
+                } catch (SQLException ex) {
+                    showError("Ошибка при удалении книги: " + ex.getMessage());
                 }
+            } else {
+                showError("Выберите книгу для удаления!");
             }
         });
+
+        deleteDbButton.addActionListener(e -> {
+            try {
+                deleteDatabase();
+                updateTable();
+            } catch (SQLException ex) {
+                showError("Ошибка при удалении базы данных: " + ex.getMessage());
+            }
+        });
+
+        showAllButton.addActionListener(e -> updateTable());
 
         frame.setVisible(true);
     }
 
-    public static void createDatabaseAndTable() throws SQLException {
-        String dbUrl = "jdbc:postgresql://localhost:5432/postgres";
-        String dbName = "library_db";
+    private void showError(String message) {
+        JOptionPane.showMessageDialog(frame, message, "Ошибка", JOptionPane.ERROR_MESSAGE);
+    }
 
-        try (Connection conn = DriverManager.getConnection(dbUrl, USER, PASSWORD);
+    public static void initializeDatabase() {
+        try (Connection conn = DriverManager.getConnection(URL, USER, PASSWORD);
              Statement stmt = conn.createStatement()) {
 
-            String checkDbExists = "SELECT 1 FROM pg_database WHERE datname = '" + dbName + "'";
-            ResultSet rs = stmt.executeQuery(checkDbExists);
-            if (!rs.next()) {
-                stmt.executeUpdate("CREATE DATABASE " + dbName);
-                System.out.println("База данных '" + dbName + "' создана.");
-            } else {
-                System.out.println("База данных уже существует.");
-            }
-        }
-
-        String dbConnectionUrl = "jdbc:postgresql://localhost:5432/" + dbName;
-        try (Connection conn = DriverManager.getConnection(dbConnectionUrl, USER, PASSWORD);
-             Statement stmt = conn.createStatement()) {
-
-            String createTableSQL = """
+            String createTable = """
                 CREATE TABLE IF NOT EXISTS books (
                     id SERIAL PRIMARY KEY,
                     title VARCHAR(255) NOT NULL,
                     author VARCHAR(255) NOT NULL
                 );
             """;
-            stmt.executeUpdate(createTableSQL);
-            System.out.println("Таблица 'books' проверена или создана.");
+
+            stmt.executeUpdate(createTable);
+        } catch (SQLException e) {
+            System.err.println("Ошибка при инициализации базы данных: " + e.getMessage());
         }
     }
 
-    public static void createProcedures() throws SQLException {
-        String createAddBookFunction = """
-            CREATE OR REPLACE FUNCTION add_book(title_param VARCHAR, author_param VARCHAR) RETURNS VOID AS $$
-            BEGIN
-                INSERT INTO books (title, author) VALUES (title_param, author_param);
-            END;
-            $$ LANGUAGE plpgsql;
-        """;
-
-        String createFindBookFunction = """
-            CREATE OR REPLACE FUNCTION find_book_by_title(title_param VARCHAR) RETURNS TABLE(title VARCHAR, author VARCHAR) AS $$
-            BEGIN
-                RETURN QUERY SELECT title, author FROM books WHERE title = title_param;
-            END;
-            $$ LANGUAGE plpgsql;
-        """;
-
-        String createRemoveBookFunction = """
-            CREATE OR REPLACE FUNCTION remove_book_by_title(title_param VARCHAR) RETURNS VOID AS $$
-            BEGIN
-                DELETE FROM books WHERE title = title_param;
-            END;
-            $$ LANGUAGE plpgsql;
-        """;
-
-        try (Connection conn = DriverManager.getConnection(URL, USER, PASSWORD);
+    public static void deleteDatabase() throws SQLException {
+        try (Connection conn = DriverManager.getConnection("jdbc:postgresql://localhost:5432/postgres", USER, PASSWORD);
              Statement stmt = conn.createStatement()) {
-            stmt.executeUpdate(createAddBookFunction);
-            stmt.executeUpdate(createFindBookFunction);
-            stmt.executeUpdate(createRemoveBookFunction);
-            System.out.println("Хранимые процедуры успешно созданы или обновлены.");
+            stmt.executeUpdate("DROP DATABASE IF EXISTS library_db");
+            JOptionPane.showMessageDialog(null, "База данных удалена!", "Информация", JOptionPane.INFORMATION_MESSAGE);
         }
     }
 
     public static void insertBook(String title, String author) throws SQLException {
-        String sql = "{CALL add_book(?, ?)}";
+        String sql = "INSERT INTO books (title, author) VALUES (?, ?)";
         try (Connection conn = DriverManager.getConnection(URL, USER, PASSWORD);
-             CallableStatement stmt = conn.prepareCall(sql)) {
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, title);
             stmt.setString(2, author);
-            stmt.execute();
+            stmt.executeUpdate();
         }
     }
 
-    public static String searchBookByTitle(String title) throws SQLException {
-        String sql = "SELECT * FROM find_book_by_title(?)";
-        StringBuilder result = new StringBuilder();
+    public void searchBookByTitle(String title) throws SQLException {
+        String sql = "SELECT * FROM books WHERE title = ?";
         try (Connection conn = DriverManager.getConnection(URL, USER, PASSWORD);
              PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, title);
             ResultSet rs = stmt.executeQuery();
+            tableModel.setRowCount(0);
             while (rs.next()) {
-                result.append("Найдено: ").append(rs.getString("title")).append(" - ")
-                        .append(rs.getString("author")).append("\n");
+                tableModel.addRow(new Object[]{rs.getInt("id"), rs.getString("title"), rs.getString("author")});
             }
         }
-        return result.toString();
     }
 
     public static void deleteBookByTitle(String title) throws SQLException {
-        String sql = "{CALL remove_book_by_title(?)}";
+        String sql = "DELETE FROM books WHERE title = ?";
         try (Connection conn = DriverManager.getConnection(URL, USER, PASSWORD);
-             CallableStatement stmt = conn.prepareCall(sql)) {
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, title);
-            stmt.execute();
+            stmt.executeUpdate();
+        }
+    }
+
+    private void updateTable() {
+        String sql = "SELECT * FROM books";
+        try (Connection conn = DriverManager.getConnection(URL, USER, PASSWORD);
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+
+            tableModel.setRowCount(0);
+            while (rs.next()) {
+                tableModel.addRow(new Object[]{rs.getInt("id"), rs.getString("title"), rs.getString("author")});
+            }
+        } catch (SQLException e) {
+            showError("Ошибка при загрузке всех книг: " + e.getMessage());
         }
     }
 }
