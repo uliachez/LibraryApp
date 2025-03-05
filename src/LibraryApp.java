@@ -50,11 +50,13 @@ public class LibraryApp {
         JButton deleteButton = new JButton("Удалить книгу");
         JButton deleteDbButton = new JButton("Удалить базу данных");
         JButton showAllButton = new JButton("Показать все книги");
+        JButton clearTableButton = new JButton("Очистить таблицу");
 
         if (isAdmin) {
             buttonPanel.add(addButton);
             buttonPanel.add(deleteButton);
             buttonPanel.add(deleteDbButton);
+            buttonPanel.add(clearTableButton);
         }
         buttonPanel.add(searchButton);
         buttonPanel.add(showAllButton);
@@ -122,6 +124,16 @@ public class LibraryApp {
             }
         });
 
+        clearTableButton.addActionListener(e -> {
+            if (!isAdmin) return;
+            try {
+                clearTable();
+                updateTable();
+            } catch (SQLException ex) {
+                showError("Ошибка при удалении таблицы: " + ex.getMessage());
+            }
+        });
+
         showAllButton.addActionListener(e -> updateTable());
 
         frame.setVisible(true);
@@ -177,6 +189,16 @@ public class LibraryApp {
             stmt.setString(1, title);
             stmt.setString(2, author);
             stmt.executeUpdate();
+        }
+    }
+
+    public void clearTable() throws SQLException {
+        if (!isAdmin) return;
+        String sql = "DELETE FROM books";
+        try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASSWORD);
+             Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate(sql);
+            JOptionPane.showMessageDialog(frame, "Все книги удалены!", "Информация", JOptionPane.INFORMATION_MESSAGE);
         }
     }
 
