@@ -143,6 +143,22 @@ public class LibraryApp {
         JOptionPane.showMessageDialog(frame, message, "Ошибка", JOptionPane.ERROR_MESSAGE);
     }
 
+    public void createBookTable() throws SQLException {
+        String sql = """
+            CREATE TABLE IF NOT EXISTS books (
+                id SERIAL PRIMARY KEY,
+                title VARCHAR(255) NOT NULL,
+                author VARCHAR(255) NOT NULL
+            );
+        """;
+        try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASSWORD);
+             Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate(sql);
+            System.out.println("Таблица books успешно создана!");
+        }
+    }
+
+
     public static void initializeDatabase(String user, String password) {
         String postgresUrl = "jdbc:postgresql://localhost:5432/postgres";
 
@@ -166,46 +182,80 @@ public class LibraryApp {
              Statement stmt = conn.createStatement()) {
 
             String createTable = """
-                CREATE TABLE IF NOT EXISTS books (
-                    id SERIAL PRIMARY KEY,
-                    title VARCHAR(255) NOT NULL,
-                    author VARCHAR(255) NOT NULL
-                );
-            """;
-
+            CREATE TABLE IF NOT EXISTS books (
+                id SERIAL PRIMARY KEY,
+                title VARCHAR(255) NOT NULL,
+                author VARCHAR(255) NOT NULL
+            );
+        """;
             stmt.executeUpdate(createTable);
             System.out.println("Таблица books проверена/создана.");
 
+            stmt.executeUpdate("""
+            CREATE OR REPLACE FUNCTION insert_book(p_title VARCHAR, p_author VARCHAR) RETURNS VOID AS $$
+            BEGIN
+                INSERT INTO books (title, author) VALUES (p_title, p_author);
+            END;
+            $$ LANGUAGE plpgsql;
+        """);
+
+            stmt.executeUpdate("""
+            CREATE OR REPLACE FUNCTION delete_book(p_title VARCHAR) RETURNS VOID AS $$
+            BEGIN
+                DELETE FROM books WHERE title = p_title;
+            END;
+            $$ LANGUAGE plpgsql;
+        """);
+
+            stmt.executeUpdate("""
+            CREATE OR REPLACE FUNCTION search_book(p_title VARCHAR) RETURNS TABLE(id INT, title VARCHAR, author VARCHAR) AS $$
+            BEGIN
+                RETURN QUERY SELECT books.id, books.title, books.author FROM books WHERE books.title = p_title;
+            END;
+            $$ LANGUAGE plpgsql;
+        """);
+
+            stmt.executeUpdate("""
+            CREATE OR REPLACE FUNCTION clear_books() RETURNS VOID AS $$
+            BEGIN
+                DELETE FROM books;
+            END;
+            $$ LANGUAGE plpgsql;
+        """);
+
+            System.out.println("Хранимые процедуры созданы.");
+            stmt.executeUpdate("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'guest_user') THEN CREATE ROLE guest_user; END IF; END $$;");
+            stmt.executeUpdate("GRANT CONNECT ON DATABASE library_db TO guest_user;");
+            stmt.executeUpdate("GRANT USAGE ON SCHEMA public TO guest_user;");
+            stmt.executeUpdate("GRANT SELECT ON ALL TABLES IN SCHEMA public TO guest_user;");
+            stmt.executeUpdate("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO guest_user;");
+
+            System.out.println("Права доступа для guest_user назначены.");
+
         } catch (SQLException e) {
-            System.err.println("Ошибка при инициализации таблицы: " + e.getMessage());
+            System.err.println("Ошибка при инициализации базы данных и хранимых процедур: " + e.getMessage());
         }
     }
+
+
+
 
     public void insertBook(String title, String author) throws SQLException {
         if (!isAdmin) return;
-        String sql = "INSERT INTO books (title, author) VALUES (?, ?)";
+        String sql = "{CALL insert_book(?, ?)}";  // Call the stored procedure
         try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASSWORD);
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
+             CallableStatement stmt = conn.prepareCall(sql)) {
             stmt.setString(1, title);
             stmt.setString(2, author);
-            stmt.executeUpdate();
+            stmt.execute();
         }
     }
 
-    public void clearTable() throws SQLException {
-        if (!isAdmin) return;
-        String sql = "DELETE FROM books";
-        try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASSWORD);
-             Statement stmt = conn.createStatement()) {
-            stmt.executeUpdate(sql);
-            JOptionPane.showMessageDialog(frame, "Все книги удалены!", "Информация", JOptionPane.INFORMATION_MESSAGE);
-        }
-    }
 
     public void searchBookByTitle(String title) throws SQLException {
-        String sql = "SELECT * FROM books WHERE title = ?";
+        String sql = "{CALL search_book(?)}";  // Call the stored procedure
         try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASSWORD);
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
+             CallableStatement stmt = conn.prepareCall(sql)) {
             stmt.setString(1, title);
             ResultSet rs = stmt.executeQuery();
             tableModel.setRowCount(0);
@@ -215,21 +265,35 @@ public class LibraryApp {
         }
     }
 
+
+
     public void deleteBookByTitle(String title) throws SQLException {
         if (!isAdmin) return;
-        String sql = "DELETE FROM books WHERE title = ?";
+        String sql = "{CALL delete_book(?)}";  // Call the stored procedure
         try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASSWORD);
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
+             CallableStatement stmt = conn.prepareCall(sql)) {
             stmt.setString(1, title);
-            stmt.executeUpdate();
+            stmt.execute();
+        }
+    }
+
+
+    public void clearTable() throws SQLException {
+        if (!isAdmin) return;
+        String sql = "{CALL clear_books()}";  // Call the stored procedure
+        try (Connection conn = DriverManager.getConnection(DB_URL, USER, PASSWORD);
+             CallableStatement stmt = conn.prepareCall(sql)) {
+            stmt.execute();
+            JOptionPane.showMessageDialog(frame, "Все книги удалены!", "Информация", JOptionPane.INFORMATION_MESSAGE);
         }
     }
 
     public void deleteDatabase() throws SQLException {
         if (!isAdmin) return;
+        String sql = "DROP DATABASE IF EXISTS library_db";
         try (Connection conn = DriverManager.getConnection("jdbc:postgresql://localhost:5432/postgres", USER, PASSWORD);
              Statement stmt = conn.createStatement()) {
-            stmt.executeUpdate("DROP DATABASE IF EXISTS library_db");
+            stmt.executeUpdate(sql);
             JOptionPane.showMessageDialog(frame, "База данных удалена!", "Информация", JOptionPane.INFORMATION_MESSAGE);
         }
     }
