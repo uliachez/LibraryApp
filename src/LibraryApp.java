@@ -40,17 +40,19 @@ public class LibraryApp {
         inputPanel.add(new JLabel("Автор:"));
         inputPanel.add(authorField);
 
-        JPanel buttonPanel = new JPanel(new GridLayout(1, 5));
+        JPanel buttonPanel = new JPanel(new GridLayout(1, 6));
         JButton addButton = new JButton("Добавить книгу");
         JButton searchButton = new JButton("Найти книгу");
         JButton deleteButton = new JButton("Удалить книгу");
         JButton deleteDbButton = new JButton("Удалить базу данных");
+        JButton clearTableButton = new JButton("Очистить таблицу");
         JButton showAllButton = new JButton("Показать все книги");
 
         buttonPanel.add(addButton);
         buttonPanel.add(searchButton);
         buttonPanel.add(deleteButton);
         buttonPanel.add(deleteDbButton);
+        buttonPanel.add(clearTableButton);
         buttonPanel.add(showAllButton);
 
         tableModel = new DefaultTableModel(new Object[]{"ID", "Название", "Автор"}, 0);
@@ -110,6 +112,15 @@ public class LibraryApp {
                 updateTable();
             } catch (SQLException ex) {
                 showError("Ошибка при удалении базы данных: " + ex.getMessage());
+            }
+        });
+
+        clearTableButton.addActionListener(e -> {
+            try {
+                clearTable();
+                updateTable();
+            } catch (SQLException ex) {
+                showError("Ошибка при очистке таблицы: " + ex.getMessage());
             }
         });
 
@@ -177,6 +188,14 @@ public class LibraryApp {
              PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, title);
             stmt.executeUpdate();
+        }
+    }
+
+    public static void clearTable() throws SQLException {
+        String sql = "DELETE FROM books";
+        try (Connection conn = DriverManager.getConnection(URL, USER, PASSWORD);
+             Statement stmt = conn.createStatement()) {
+            stmt.executeUpdate(sql);
         }
     }
 
